@@ -311,10 +311,16 @@ public class ReaderPostActions {
         WordPress.getRestClientUtils().get(path, null, null, listener, errorListener);
     }
 
-    private static final int BACKFILL_MAX_RECURSION = 3;
+    /*
+     * "backfill" posts with a specific tag - used to fill in gaps between syncs, ex: sync the
+     * reader, come back the next day and sync again, with a popular tag there may be posts
+     * missing between the posts retrieved the previous day and the posts just retrieved
+     */
+    private static final int BACKFILL_MAX_RECURSION = 2;
     private static void backfillPostsWithTag(final String tagName,
                                              final Date dateBefore,
-                                             final int recursionCounter) {
+                                             final int recursionCounter,
+                                             final ReaderActions.PostBackfillListener backfillListener) {
         final ReaderTag topic = ReaderTagTable.getTag(tagName);
         if (topic == null) {
             return;
@@ -338,10 +344,20 @@ public class ReaderPostActions {
                 if (numNewPosts == 0) {
                     return;
                 }
+
+                AppLog.i(T.READER, String.format("backfilling tag %s found %d new posts", tagName, numNewPosts));
                 ReaderPostTable.addOrUpdatePosts(tagName, serverPosts);
+                if (backfillListener != null) {
+                    backfillListener.onPostsBackfilled();
+                }
+
                 boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
+                // enforce a max on recursion so we don't backfill forever!
                 if (areAllPostsNew && recursionCounter < BACKFILL_MAX_RECURSION) {
-                    backfillPostsWithTag(tagName, serverPosts.getOldestPubDate(), recursionCounter + 1);
+                    backfillPostsWithTag(tagName,
+                                         serverPosts.getOldestPubDate(),
+                                         recursionCounter + 1,
+                                         backfillListener);
                 }
             }
         };
@@ -352,7 +368,7 @@ public class ReaderPostActions {
             }
         };
 
-        AppLog.i(T.READER, "backfilling tag " + tagName + " recursion " + Integer.toString(recursionCounter));
+        AppLog.i(T.READER, String.format("backfilling tag %s, recursion %d", tagName, recursionCounter));
         WordPress.getRestClientUtils().get(sb.toString(), null, null, listener, errorListener);
     }
 
@@ -362,8 +378,8 @@ public class ReaderPostActions {
      */
     public static void updatePostsWithTag(final String tagName,
                                           final ReaderActions.RequestDataAction updateAction,
-                                          final ReaderActions.UpdateResultAndCountListener resultListener) {
-//Debug.startMethodTracing("WordPress");
+                                          final ReaderActions.UpdateResultAndCountListener resultListener,
+                                          final ReaderActions.PostBackfillListener backfillListener) {
         final ReaderTag topic = ReaderTagTable.getTag(tagName);
         if (topic == null) {
             if (resultListener != null)
@@ -412,7 +428,7 @@ public class ReaderPostActions {
         com.wordpress.rest.RestRequest.Listener listener = new RestRequest.Listener() {
             @Override
             public void onResponse(JSONObject jsonObject) {
-                handleUpdatePostsWithTagResponse(tagName, updateAction, jsonObject, resultListener);
+                handleUpdatePostsWithTagResponse(tagName, updateAction, jsonObject, resultListener, backfillListener);
             }
         };
         RestRequest.ErrorListener errorListener = new RestRequest.ErrorListener() {
@@ -426,10 +442,12 @@ public class ReaderPostActions {
 
         WordPress.getRestClientUtils().get(endpoint, null, null, listener, errorListener);
     }
+
     private static void handleUpdatePostsWithTagResponse(final String tagName,
                                                          final ReaderActions.RequestDataAction updateAction,
                                                          final JSONObject jsonObject,
-                                                         final ReaderActions.UpdateResultAndCountListener resultListener) {
+                                                         final ReaderActions.UpdateResultAndCountListener resultListener,
+                                                         final ReaderActions.PostBackfillListener backfillListener) {
         if (jsonObject == null) {
             if (resultListener != null)
                 resultListener.onUpdateResult(ReaderActions.UpdateResult.FAILED, -1);
@@ -481,6 +499,9 @@ public class ReaderPostActions {
                     return;
                 }
 
+                // remember whether tag has existing posts
+                boolean hasExistingPostsInTag = ReaderPostTable.hasPostsWithTag(tagName);
+
                 // determine how many of the downloaded posts are new (response will contain both
                 // new posts and posts updated since the last call), then save the posts even if
                 // none are new in order to update comment counts, likes, etc., on existing posts
@@ -499,14 +520,20 @@ public class ReaderPostActions {
                     });
                 }
 
-                if (responseHasPosts && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER) {
+                // if a backfill listener was passed, new posts were requested, there were
+                // existing posts with this tag, and all posts retrieved are new, then
+                // backfill the posts if a backfill listener was passed
+                if (responseHasPosts
+                        && hasExistingPostsInTag
+                        && backfillListener != null
+                        && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER)
+                {
                     boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
                     if (areAllPostsNew) {
                         Date dtOldestServerPost = serverPosts.getOldestPubDate();
-                        backfillPostsWithTag(tagName, dtOldestServerPost, 0);
+                        backfillPostsWithTag(tagName, dtOldestServerPost, 0, backfillListener);
                     }
                 }
-//Debug.stopMethodTracing();
             }
         }.start();
     }

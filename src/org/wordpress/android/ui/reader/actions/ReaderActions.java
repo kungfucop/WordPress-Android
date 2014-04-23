@@ -46,6 +46,13 @@ public class ReaderActions {
     }
 
     /*
+     * listener when updating posts and then backfilling them
+     */
+    public interface PostBackfillListener {
+        public void onPostsBackfilled();
+    }
+
+    /*
      * used by adapters to notify when data has been loaded
      */
     public interface DataLoadedListener {

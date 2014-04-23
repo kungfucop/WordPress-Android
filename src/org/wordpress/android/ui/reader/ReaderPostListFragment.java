@@ -33,6 +33,7 @@ import org.wordpress.android.ui.PullToRefreshHelper.RefreshListener;
 import org.wordpress.android.ui.WPActionBarActivity;
 import org.wordpress.android.ui.prefs.UserPrefs;
 import org.wordpress.android.ui.reader.actions.ReaderActions;
+import org.wordpress.android.ui.reader.actions.ReaderActions.PostBackfillListener;
 import org.wordpress.android.ui.reader.actions.ReaderPostActions;
 import org.wordpress.android.ui.reader.adapters.ReaderActionBarTagAdapter;
 import org.wordpress.android.ui.reader.adapters.ReaderPostAdapter;
@@ -161,7 +162,7 @@ public class ReaderPostListFragment extends SherlockFragment
                             mPullToRefreshHelper.setRefreshing(false);
                             return;
                         }
-                        updatePostsWithCurrentTag(ReaderActions.RequestDataAction.LOAD_NEWER, RefreshType.MANUAL);
+                        updatePostsWithTag(getCurrentTag(), ReaderActions.RequestDataAction.LOAD_NEWER, RefreshType.MANUAL);
                     }
                 });
         mListView.setAdapter(getPostAdapter());
@@ -362,7 +363,7 @@ public class ReaderPostListFragment extends SherlockFragment
                 return;
             // request older posts
             AnalyticsTracker.track(AnalyticsTracker.Stat.READER_INFINITE_SCROLL);
-            updatePostsWithCurrentTag(ReaderActions.RequestDataAction.LOAD_OLDER, RefreshType.MANUAL);
+            updatePostsWithTag(getCurrentTag(), ReaderActions.RequestDataAction.LOAD_OLDER, RefreshType.MANUAL);
         }
     };
 
@@ -466,13 +467,9 @@ public class ReaderPostListFragment extends SherlockFragment
     /*
      * get latest posts for this tag from the server
      */
-    private void updatePostsWithCurrentTag(ReaderActions.RequestDataAction updateAction, RefreshType refreshType) {
-        if (hasCurrentTag())
-            updatePostsWithTag(mCurrentTag, updateAction, refreshType);
-    }
-
-    private void updatePostsWithTag(final String tagName, final ReaderActions.RequestDataAction updateAction,
-                                    RefreshType refreshType) {
+    private void updatePostsWithTag(final String tagName,
+                                    final ReaderActions.RequestDataAction updateAction,
+                                    final RefreshType refreshType) {
         if (TextUtils.isEmpty(tagName)) {
             return;
         }
@@ -492,7 +489,7 @@ public class ReaderPostListFragment extends SherlockFragment
                 refreshPosts();
         }
 
-        ReaderPostActions.updatePostsWithTag(tagName, updateAction, new ReaderActions.UpdateResultAndCountListener() {
+        ReaderActions.UpdateResultAndCountListener resultListener = new ReaderActions.UpdateResultAndCountListener() {
             @Override
             public void onUpdateResult(ReaderActions.UpdateResult result, int numNewPosts) {
                 if (!hasActivity()) {
@@ -515,7 +512,25 @@ public class ReaderPostListFragment extends SherlockFragment
                     setEmptyTitleAndDescriptionForCurrentTag();
                 }
             }
-        });
+        };
+
+        // if this is an automatic request for newer posts, assign a backfill listener to
+        // ensure there aren't any gaps between this update and the previous one
+        final ReaderActions.PostBackfillListener backfillListener;
+        boolean allowBackfill = (updateAction == ReaderActions.RequestDataAction.LOAD_NEWER
+                              && refreshType == RefreshType.AUTOMATIC);
+        if (allowBackfill) {
+            backfillListener = new PostBackfillListener() {
+                @Override
+                public void onPostsBackfilled() {
+                    refreshPosts();
+                }
+            };
+        } else {
+            backfillListener = null;
+        }
+
+        ReaderPostActions.updatePostsWithTag(tagName, updateAction, resultListener, backfillListener);
     }
 
     public boolean isUpdating() {
