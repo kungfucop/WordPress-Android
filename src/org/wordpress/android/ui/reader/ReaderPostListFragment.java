@@ -516,21 +516,21 @@ public class ReaderPostListFragment extends SherlockFragment
 
         // if this is an automatic request for newer posts, assign a backfill listener to
         // ensure there aren't any gaps between this update and the previous one
-        final ReaderActions.PostBackfillListener backfillListener;
         boolean allowBackfill = (updateAction == ReaderActions.RequestDataAction.LOAD_NEWER
                               && refreshType == RefreshType.AUTOMATIC);
         if (allowBackfill) {
-            backfillListener = new PostBackfillListener() {
+            PostBackfillListener backfillListener = new PostBackfillListener() {
                 @Override
-                public void onPostsBackfilled() {
-                    refreshPosts();
+                public void onPostsBackfilled(int numNew) {
+                    if (hasActivity() && isCurrentTag(tagName)) {
+                        refreshPosts();
+                    }
                 }
             };
+            ReaderPostActions.updatePostsWithTag(tagName, updateAction, resultListener, backfillListener);
         } else {
-            backfillListener = null;
+            ReaderPostActions.updatePostsWithTag(tagName, updateAction, resultListener);
         }
-
-        ReaderPostActions.updatePostsWithTag(tagName, updateAction, resultListener, backfillListener);
     }
 
     public boolean isUpdating() {
@@ -560,22 +560,41 @@ public class ReaderPostListFragment extends SherlockFragment
     /*
      * bar that appears at the top when new posts have been retrieved
      */
+    private int mNumNewPostsInBar = 0;
+
+    private boolean isNewPostsBarShowing() {
+        return (mNewPostsBar != null && mNewPostsBar.getVisibility() == View.VISIBLE);
+    }
+
     private void showNewPostsBar(int numNewPosts) {
-        if (mNewPostsBar==null || mNewPostsBar.getVisibility()==View.VISIBLE)
-            return;
-        if (numNewPosts==1) {
+        // if the bar is already showing, increment the count
+        boolean isAlreadyShowing = isNewPostsBarShowing();
+        if (isAlreadyShowing) {
+            numNewPosts += mNumNewPostsInBar;
+        }
+
+        if (numNewPosts == 1) {
             mNewPostsBar.setText(R.string.reader_label_new_posts_one);
         } else {
             mNewPostsBar.setText(getString(R.string.reader_label_new_posts_multi, numNewPosts));
         }
-        AniUtils.startAnimation(mNewPostsBar, R.anim.reader_top_bar_in);
-        mNewPostsBar.setVisibility(View.VISIBLE);
+
+        if (!isAlreadyShowing) {
+            AniUtils.startAnimation(mNewPostsBar, R.anim.reader_top_bar_in);
+            mNewPostsBar.setVisibility(View.VISIBLE);
+        }
+
+        mNumNewPostsInBar = numNewPosts;
         mPullToRefreshHelper.hideTipTemporarily(true);
     }
 
     private void hideNewPostsBar() {
-        if (mNewPostsBar==null || mNewPostsBar.getVisibility()!=View.VISIBLE)
+        mNumNewPostsInBar = 0;
+
+        if (!isNewPostsBarShowing()) {
             return;
+        }
+
         Animation.AnimationListener listener = new Animation.AnimationListener() {
             @Override
             public void onAnimationStart(Animation animation) { }

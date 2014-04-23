@@ -374,8 +374,14 @@ public class ReaderPostActions {
 
     /*
      * get the latest posts in the passed topic - note that this uses an UpdateResultAndCountListener
-     * so the caller can be told how many new posts were added
+     * so the caller can be told how many new posts were added - use the second method with accepts
+     * a backfillListener to backfill missing posts
      */
+    public static void updatePostsWithTag(final String tagName,
+                                          final ReaderActions.RequestDataAction updateAction,
+                                          final ReaderActions.UpdateResultAndCountListener resultListener) {
+        updatePostsWithTag(tagName, updateAction, resultListener, null);
+    }
     public static void updatePostsWithTag(final String tagName,
                                           final ReaderActions.RequestDataAction updateAction,
                                           final ReaderActions.UpdateResultAndCountListener resultListener,

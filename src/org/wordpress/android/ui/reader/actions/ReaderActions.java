@@ -49,7 +49,7 @@ public class ReaderActions {
      * listener when updating posts and then backfilling them
      */
     public interface PostBackfillListener {
-        public void onPostsBackfilled();
+        public void onPostsBackfilled(int numNew);
     }
 
     /*
