@@ -311,6 +311,51 @@ public class ReaderPostActions {
         WordPress.getRestClientUtils().get(path, null, null, listener, errorListener);
     }
 
+    private static final int BACKFILL_MAX_RECURSION = 3;
+    private static void backfillPostsWithTag(final String tagName,
+                                             final Date dateBefore,
+                                             final int recursionCounter) {
+        final ReaderTag topic = ReaderTagTable.getTag(tagName);
+        if (topic == null) {
+            return;
+        }
+
+        String strDateBefore = DateTimeUtils.javaDateToIso8601(dateBefore);
+
+        StringBuilder sb = new StringBuilder(topic.getEndpoint())
+                        .append("?number=").append(Constants.READER_MAX_POSTS_TO_REQUEST)
+                        .append("&order=DESC")
+                        .append("&before=").append(UrlUtils.urlEncode(strDateBefore));
+
+        com.wordpress.rest.RestRequest.Listener listener = new RestRequest.Listener() {
+            @Override
+            public void onResponse(JSONObject jsonObject) {
+                if (jsonObject == null) {
+                    return;
+                }
+                ReaderPostList serverPosts = ReaderPostList.fromJson(jsonObject);
+                int numNewPosts = ReaderPostTable.getNumNewPostsWithTag(tagName, serverPosts);
+                if (numNewPosts == 0) {
+                    return;
+                }
+                ReaderPostTable.addOrUpdatePosts(tagName, serverPosts);
+                boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
+                if (areAllPostsNew && recursionCounter < BACKFILL_MAX_RECURSION) {
+                    backfillPostsWithTag(tagName, serverPosts.getOldestPubDate(), recursionCounter + 1);
+                }
+            }
+        };
+        RestRequest.ErrorListener errorListener = new RestRequest.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError volleyError) {
+                AppLog.e(T.READER, volleyError);
+            }
+        };
+
+        AppLog.i(T.READER, "backfilling tag " + tagName + " recursion " + Integer.toString(recursionCounter));
+        WordPress.getRestClientUtils().get(sb.toString(), null, null, listener, errorListener);
+    }
+
     /*
      * get the latest posts in the passed topic - note that this uses an UpdateResultAndCountListener
      * so the caller can be told how many new posts were added
@@ -452,6 +497,14 @@ public class ReaderPostActions {
                             resultListener.onUpdateResult(ReaderActions.UpdateResult.CHANGED, numNewPosts);
                         }
                     });
+                }
+
+                if (responseHasPosts && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER) {
+                    boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
+                    if (areAllPostsNew) {
+                        Date dtOldestServerPost = serverPosts.getOldestPubDate();
+                        backfillPostsWithTag(tagName, dtOldestServerPost, 0);
+                    }
                 }
 //Debug.stopMethodTracing();
             }

@@ -2,8 +2,10 @@ package org.wordpress.android.models;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.wordpress.android.util.DateTimeUtils;
 
 import java.util.ArrayList;
+import java.util.Date;
 
 public class ReaderPostList extends ArrayList<ReaderPost> {
 
@@ -33,6 +35,22 @@ public class ReaderPostList extends ArrayList<ReaderPost> {
         if (post==null)
             return -1;
         return indexOfPost(post.blogId, post.postId);
+    }
+
+    public Date getOldestPubDate() {
+        Date oldestDate = null;
+        for (ReaderPost post: this) {
+            Date dtPublished = post.getDatePublished();
+            if (dtPublished != null) {
+                if (oldestDate == null) {
+                    oldestDate = dtPublished;
+                } else if (oldestDate.after(dtPublished)) {
+                    oldestDate = dtPublished;
+                }
+            }
+        }
+
+        return oldestDate;
     }
 
     /*
