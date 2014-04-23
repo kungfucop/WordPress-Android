@@ -178,10 +178,6 @@ public class ReaderPostTable {
         if (posts == null || posts.size() == 0 || TextUtils.isEmpty(tagName))
             return 0;
 
-        // if there aren't any posts in this tag, then all passed posts are new
-        if (getNumPostsWithTag(tagName) == 0)
-            return posts.size();
-
         StringBuilder sb = new StringBuilder("SELECT COUNT(*) FROM tbl_post_tags WHERE tag_name=? AND pseudo_id IN (");
         boolean isFirst = true;
         for (ReaderPost post: posts) {

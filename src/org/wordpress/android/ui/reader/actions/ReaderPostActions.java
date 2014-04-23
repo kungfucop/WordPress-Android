@@ -336,29 +336,7 @@ public class ReaderPostActions {
         com.wordpress.rest.RestRequest.Listener listener = new RestRequest.Listener() {
             @Override
             public void onResponse(JSONObject jsonObject) {
-                if (jsonObject == null) {
-                    return;
-                }
-                ReaderPostList serverPosts = ReaderPostList.fromJson(jsonObject);
-                int numNewPosts = ReaderPostTable.getNumNewPostsWithTag(tagName, serverPosts);
-                if (numNewPosts == 0) {
-                    return;
-                }
-
-                AppLog.i(T.READER, String.format("backfilling tag %s found %d new posts", tagName, numNewPosts));
-                ReaderPostTable.addOrUpdatePosts(tagName, serverPosts);
-                if (backfillListener != null) {
-                    backfillListener.onPostsBackfilled();
-                }
-
-                boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
-                // enforce a max on recursion so we don't backfill forever!
-                if (areAllPostsNew && recursionCounter < BACKFILL_MAX_RECURSION) {
-                    backfillPostsWithTag(tagName,
-                                         serverPosts.getOldestPubDate(),
-                                         recursionCounter + 1,
-                                         backfillListener);
-                }
+                handleBackfillResponse(jsonObject, tagName, recursionCounter, backfillListener);
             }
         };
         RestRequest.ErrorListener errorListener = new RestRequest.ErrorListener() {
@@ -371,21 +349,68 @@ public class ReaderPostActions {
         AppLog.i(T.READER, String.format("backfilling tag %s, recursion %d", tagName, recursionCounter));
         WordPress.getRestClientUtils().get(sb.toString(), null, null, listener, errorListener);
     }
+    private static void handleBackfillResponse(final JSONObject jsonObject,
+                                               final String tagName,
+                                               final int recursionCounter,
+                                               final ReaderActions.PostBackfillListener backfillListener) {
+        if (jsonObject == null) {
+            return;
+        }
+
+        final Handler handler = new Handler();
+
+        new Thread() {
+            @Override
+            public void run() {
+                final ReaderPostList serverPosts = ReaderPostList.fromJson(jsonObject);
+                final int numNewPosts = ReaderPostTable.getNumNewPostsWithTag(tagName, serverPosts);
+                if (numNewPosts == 0) {
+                    return;
+                }
+
+                AppLog.i(T.READER, String.format("backfilling tag %s found %d new posts", tagName, numNewPosts));
+                ReaderPostTable.addOrUpdatePosts(tagName, serverPosts);
+
+                handler.post(new Runnable() {
+                    public void run() {
+                        if (backfillListener != null) {
+                            backfillListener.onPostsBackfilled(numNewPosts);
+                        }
+
+                        // backfill again if all posts were new, but enforce a max on recursion
+                        // so we don't backfill forever
+                        boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
+                        if (areAllPostsNew && recursionCounter < BACKFILL_MAX_RECURSION) {
+                            backfillPostsWithTag(tagName,
+                                    serverPosts.getOldestPubDate(),
+                                    recursionCounter + 1,
+                                    backfillListener);
+                        }
+                    }
+                });
+            }
+        }.start();
+    }
 
     /*
      * get the latest posts in the passed topic - note that this uses an UpdateResultAndCountListener
-     * so the caller can be told how many new posts were added - use the second method with accepts
-     * a backfillListener to backfill missing posts
+     * so the caller can be told how many new posts were added - use the second method which accepts
+     * a backfillListener to request new posts and backfill missing posts
      */
-    public static void updatePostsWithTag(final String tagName,
-                                          final ReaderActions.RequestDataAction updateAction,
-                                          final ReaderActions.UpdateResultAndCountListener resultListener) {
-        updatePostsWithTag(tagName, updateAction, resultListener, null);
+    public static void updatePostsInTag(final String tagName,
+                                        final ReaderActions.RequestDataAction updateAction,
+                                        final ReaderActions.UpdateResultAndCountListener resultListener) {
+        updatePostsInTag(tagName, updateAction, resultListener, null);
     }
-    public static void updatePostsWithTag(final String tagName,
-                                          final ReaderActions.RequestDataAction updateAction,
-                                          final ReaderActions.UpdateResultAndCountListener resultListener,
-                                          final ReaderActions.PostBackfillListener backfillListener) {
+    public static void updatePostsInTagWithBackfill(final String tagName,
+                                        final ReaderActions.UpdateResultAndCountListener resultListener,
+                                        final ReaderActions.PostBackfillListener backfillListener) {
+        updatePostsInTag(tagName, ReaderActions.RequestDataAction.LOAD_NEWER, resultListener, backfillListener);
+    }
+    private static void updatePostsInTag(final String tagName,
+                                        final ReaderActions.RequestDataAction updateAction,
+                                        final ReaderActions.UpdateResultAndCountListener resultListener,
+                                        final ReaderActions.PostBackfillListener backfillListener) {
         final ReaderTag topic = ReaderTagTable.getTag(tagName);
         if (topic == null) {
             if (resultListener != null)
@@ -464,21 +489,33 @@ public class ReaderPostActions {
         new Thread() {
             @Override
             public void run() {
-                ReaderPostList serverPosts = ReaderPostList.fromJson(jsonObject);
-                final boolean responseHasPosts = (serverPosts.size() > 0);
+                final ReaderPostList serverPosts = ReaderPostList.fromJson(jsonObject);
 
                 // remember when this topic was updated if newer posts were requested, regardless of
                 // whether the response contained any posts
-                if (updateAction == ReaderActions.RequestDataAction.LOAD_NEWER)
+                if (updateAction == ReaderActions.RequestDataAction.LOAD_NEWER) {
                     ReaderTagTable.setTagLastUpdated(tagName, DateTimeUtils.javaDateToIso8601(new Date()));
+                }
+
+                // go no further if the response didn't contain any posts
+                if (serverPosts.size() == 0) {
+                    AppLog.d(T.READER, String.format("no new posts in topic %s", tagName));
+                    if (resultListener != null) {
+                        handler.post(new Runnable() {
+                            public void run() {
+                                resultListener.onUpdateResult(ReaderActions.UpdateResult.UNCHANGED, 0);
+                            }
+                        });
+                    }
+                    return;
+                }
 
                 // json "date_range" tells the the range of dates in the response, which we want to
                 // store for use the next time we request newer/older if this response contained any
                 // posts - note that freshly-pressed uses "newest" and "oldest" but other endpoints
                 // use "after" and "before"
                 JSONObject jsonDateRange = jsonObject.optJSONObject("date_range");
-
-                if (responseHasPosts && jsonDateRange != null) {
+                if (jsonDateRange != null) {
                     switch (updateAction) {
                         case LOAD_NEWER:
                             String newest = jsonDateRange.has("before") ? JSONUtil.getString(jsonDateRange, "before") : JSONUtil.getString(jsonDateRange, "newest");
@@ -493,53 +530,44 @@ public class ReaderPostActions {
                     }
                 }
 
-                if (!responseHasPosts) {
-                    AppLog.d(T.READER, String.format("no new posts in topic %s", tagName));
-                    if (resultListener != null) {
-                        handler.post(new Runnable() {
-                            public void run() {
-                                resultListener.onUpdateResult(ReaderActions.UpdateResult.UNCHANGED, 0);
-                            }
-                        });
-                    }
-                    return;
-                }
+                // remember whether there were existing posts with this tag before adding
+                // the ones we just retrieved
+                final boolean hasExistingPostsWithTag = ReaderPostTable.hasPostsWithTag(tagName);
 
-                // remember whether tag has existing posts
-                boolean hasExistingPostsInTag = ReaderPostTable.hasPostsWithTag(tagName);
-
-                // determine how many of the downloaded posts are new (response will contain both
+                // determine how many of the downloaded posts are new (response may contain both
                 // new posts and posts updated since the last call), then save the posts even if
                 // none are new in order to update comment counts, likes, etc., on existing posts
-                final int numNewPosts = ReaderPostTable.getNumNewPostsWithTag(tagName, serverPosts);
+                final int numNewPosts;
+                if (hasExistingPostsWithTag) {
+                    numNewPosts = ReaderPostTable.getNumNewPostsWithTag(tagName, serverPosts);
+                } else {
+                    numNewPosts = serverPosts.size();
+                }
                 ReaderPostTable.addOrUpdatePosts(tagName, serverPosts);
 
                 AppLog.d(T.READER, String.format("retrieved %d posts (%d new) in topic %s", serverPosts.size(), numNewPosts, tagName));
 
-                if (resultListener != null) {
-                    handler.post(new Runnable() {
-                        public void run() {
+
+                handler.post(new Runnable() {
+                    public void run() {
+                        if (resultListener != null) {
                             // always pass CHANGED as the result even if there are no new posts (since if
                             // get this far, it means there are changed - updated - posts)
                             resultListener.onUpdateResult(ReaderActions.UpdateResult.CHANGED, numNewPosts);
                         }
-                    });
-                }
 
-                // if a backfill listener was passed, new posts were requested, there were
-                // existing posts with this tag, and all posts retrieved are new, then
-                // backfill the posts if a backfill listener was passed
-                if (responseHasPosts
-                        && hasExistingPostsInTag
-                        && backfillListener != null
-                        && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER)
-                {
-                    boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
-                    if (areAllPostsNew) {
-                        Date dtOldestServerPost = serverPosts.getOldestPubDate();
-                        backfillPostsWithTag(tagName, dtOldestServerPost, 0, backfillListener);
+                        // if a backfill listener was passed, there were existing posts, and all posts
+                        // retrieved are new, then backfill the posts to fill in gaps between posts
+                        // just retrieved and posts previously retrieved
+                        if (backfillListener != null && hasExistingPostsWithTag) {
+                            boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
+                            if (areAllPostsNew) {
+                                Date dtOldestServerPost = serverPosts.getOldestPubDate();
+                                backfillPostsWithTag(tagName, dtOldestServerPost, 0, backfillListener);
+                            }
+                        }
                     }
-                }
+                });
             }
         }.start();
     }

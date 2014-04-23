@@ -493,13 +493,19 @@ public class ReaderPostListFragment extends SherlockFragment
             @Override
             public void onUpdateResult(ReaderActions.UpdateResult result, int numNewPosts) {
                 if (!hasActivity()) {
-                    AppLog.w(T.READER, "reader post list > volley response when fragment has no activity");
+                    AppLog.w(T.READER, "reader post list > new posts when fragment has no activity");
                     return;
                 }
 
                 setIsUpdating(false, updateAction);
 
-                if (result == ReaderActions.UpdateResult.CHANGED && numNewPosts > 0 && isCurrentTag(tagName)) {
+                // make sure this is still the current tag (user may have switched tags during the update)
+                if (!isCurrentTag(tagName)) {
+                    AppLog.w(T.READER, "reader post list > new posts in inactive tag");
+                    return;
+                }
+
+                if (result == ReaderActions.UpdateResult.CHANGED && numNewPosts > 0) {
                     // if we loaded new posts and posts are already displayed, show the "new posts"
                     // bar rather than immediately refreshing the list
                     if (!isPostAdapterEmpty() && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER) {
@@ -521,15 +527,23 @@ public class ReaderPostListFragment extends SherlockFragment
         if (allowBackfill) {
             PostBackfillListener backfillListener = new PostBackfillListener() {
                 @Override
-                public void onPostsBackfilled(int numNew) {
-                    if (hasActivity() && isCurrentTag(tagName)) {
-                        refreshPosts();
+                public void onPostsBackfilled(int numNewPosts) {
+                    if (!hasActivity()) {
+                        AppLog.w(T.READER, "reader post list > new posts backfilled when fragment has no activity");
+                        return;
+                    }
+                    // if this is the current tag and the "new posts" bar is showing, update the
+                    // bar so the user can display the posts - if not, we'll just let the user see
+                    // the backfilled posts the next time they refresh the list (the alternative
+                    // is to refresh the list now, but that could be jarring)
+                    if (isCurrentTag(tagName) && isNewPostsBarShowing()) {
+                        showNewPostsBar(numNewPosts);
                     }
                 }
             };
-            ReaderPostActions.updatePostsWithTag(tagName, updateAction, resultListener, backfillListener);
+            ReaderPostActions.updatePostsInTagWithBackfill(tagName, resultListener, backfillListener);
         } else {
-            ReaderPostActions.updatePostsWithTag(tagName, updateAction, resultListener);
+            ReaderPostActions.updatePostsInTag(tagName, updateAction, resultListener);
         }
     }
 
