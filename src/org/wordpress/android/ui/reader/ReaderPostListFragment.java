@@ -501,7 +501,7 @@ public class ReaderPostListFragment extends SherlockFragment
 
                 // make sure this is still the current tag (user may have switched tags during the update)
                 if (!isCurrentTag(tagName)) {
-                    AppLog.w(T.READER, "reader post list > new posts in inactive tag");
+                    AppLog.i(T.READER, "reader post list > new posts in inactive tag");
                     return;
                 }
 
@@ -509,7 +509,7 @@ public class ReaderPostListFragment extends SherlockFragment
                     // if we loaded new posts and posts are already displayed, show the "new posts"
                     // bar rather than immediately refreshing the list
                     if (!isPostAdapterEmpty() && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER) {
-                        showNewPostsBar(numNewPosts);
+                        showNewPostsBar();
                     } else {
                         refreshPosts();
                     }
@@ -532,12 +532,13 @@ public class ReaderPostListFragment extends SherlockFragment
                         AppLog.w(T.READER, "reader post list > new posts backfilled when fragment has no activity");
                         return;
                     }
-                    // if this is the current tag and the "new posts" bar is showing, update the
-                    // bar so the user can display the posts - if not, we'll just let the user see
-                    // the backfilled posts the next time they refresh the list (the alternative
-                    // is to refresh the list now, but that could be jarring)
-                    if (isCurrentTag(tagName) && isNewPostsBarShowing()) {
-                        showNewPostsBar(numNewPosts);
+                    if (!isCurrentTag(tagName)) {
+                        AppLog.i(T.READER, "reader post list > new posts backfilled in inactive tag");
+
+                    } else if (isPostAdapterEmpty()) {
+                        // show the new posts right away if this is the current tag and there aren't
+                        // any posts showing, otherwise just let them be shown on the next refresh
+                        showNewPostsBar();
                     }
                 }
             };
@@ -574,38 +575,23 @@ public class ReaderPostListFragment extends SherlockFragment
     /*
      * bar that appears at the top when new posts have been retrieved
      */
-    private int mNumNewPostsInBar = 0;
-
     private boolean isNewPostsBarShowing() {
         return (mNewPostsBar != null && mNewPostsBar.getVisibility() == View.VISIBLE);
     }
 
-    private void showNewPostsBar(int numNewPosts) {
-        // if the bar is already showing, increment the count
-        boolean isAlreadyShowing = isNewPostsBarShowing();
-        if (isAlreadyShowing) {
-            numNewPosts += mNumNewPostsInBar;
+    private void showNewPostsBar() {
+        if (!hasActivity() || isNewPostsBarShowing()) {
+            return;
         }
 
-        if (numNewPosts == 1) {
-            mNewPostsBar.setText(R.string.reader_label_new_posts_one);
-        } else {
-            mNewPostsBar.setText(getString(R.string.reader_label_new_posts_multi, numNewPosts));
-        }
+        AniUtils.startAnimation(mNewPostsBar, R.anim.reader_top_bar_in);
+        mNewPostsBar.setVisibility(View.VISIBLE);
 
-        if (!isAlreadyShowing) {
-            AniUtils.startAnimation(mNewPostsBar, R.anim.reader_top_bar_in);
-            mNewPostsBar.setVisibility(View.VISIBLE);
-        }
-
-        mNumNewPostsInBar = numNewPosts;
         mPullToRefreshHelper.hideTipTemporarily(true);
     }
 
     private void hideNewPostsBar() {
-        mNumNewPostsInBar = 0;
-
-        if (!isNewPostsBarShowing()) {
+        if (!hasActivity() || !isNewPostsBarShowing()) {
             return;
         }
 
