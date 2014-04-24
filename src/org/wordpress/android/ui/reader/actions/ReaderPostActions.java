@@ -316,7 +316,7 @@ public class ReaderPostActions {
      * reader, come back the next day and sync again, with a popular tag there may be posts
      * missing between the posts retrieved the previous day and the posts just retrieved
      */
-    private static final int BACKFILL_MAX_RECURSION = 2;
+    private static final int BACKFILL_MAX_RECURSION = 3;
     private static void backfillPostsWithTag(final String tagName,
                                              final Date dateBefore,
                                              final int recursionCounter,
@@ -556,9 +556,9 @@ public class ReaderPostActions {
                             resultListener.onUpdateResult(ReaderActions.UpdateResult.CHANGED, numNewPosts);
                         }
 
-                        // if a backfill listener was passed, there were existing posts, and all posts
-                        // retrieved are new, then backfill the posts to fill in gaps between posts
-                        // just retrieved and posts previously retrieved
+                        // if a backfill listener was passed, there were existing posts with this tag,
+                        // and all posts retrieved are new, then backfill the posts to fill in gaps
+                        // between posts just retrieved and posts previously retrieved
                         if (backfillListener != null && hasExistingPostsWithTag) {
                             boolean areAllPostsNew = (numNewPosts == Constants.READER_MAX_POSTS_TO_REQUEST);
                             if (areAllPostsNew) {

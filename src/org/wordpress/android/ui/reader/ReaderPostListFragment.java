@@ -34,6 +34,7 @@ import org.wordpress.android.ui.WPActionBarActivity;
 import org.wordpress.android.ui.prefs.UserPrefs;
 import org.wordpress.android.ui.reader.actions.ReaderActions;
 import org.wordpress.android.ui.reader.actions.ReaderActions.PostBackfillListener;
+import org.wordpress.android.ui.reader.actions.ReaderActions.RequestDataAction;
 import org.wordpress.android.ui.reader.actions.ReaderPostActions;
 import org.wordpress.android.ui.reader.adapters.ReaderActionBarTagAdapter;
 import org.wordpress.android.ui.reader.adapters.ReaderPostAdapter;
@@ -162,7 +163,7 @@ public class ReaderPostListFragment extends SherlockFragment
                             mPullToRefreshHelper.setRefreshing(false);
                             return;
                         }
-                        updatePostsWithTag(getCurrentTag(), ReaderActions.RequestDataAction.LOAD_NEWER, RefreshType.MANUAL);
+                        updatePostsWithTag(getCurrentTag(), RequestDataAction.LOAD_NEWER, RefreshType.MANUAL);
                     }
                 });
         mListView.setAdapter(getPostAdapter());
@@ -354,7 +355,7 @@ public class ReaderPostListFragment extends SherlockFragment
      */
     private final ReaderActions.DataRequestedListener mDataRequestedListener = new ReaderActions.DataRequestedListener() {
         @Override
-        public void onRequestData(ReaderActions.RequestDataAction action) {
+        public void onRequestData(RequestDataAction action) {
             // skip if update is already in progress
             if (isUpdating())
                 return;
@@ -363,7 +364,7 @@ public class ReaderPostListFragment extends SherlockFragment
                 return;
             // request older posts
             AnalyticsTracker.track(AnalyticsTracker.Stat.READER_INFINITE_SCROLL);
-            updatePostsWithTag(getCurrentTag(), ReaderActions.RequestDataAction.LOAD_OLDER, RefreshType.MANUAL);
+            updatePostsWithTag(getCurrentTag(), RequestDataAction.LOAD_OLDER, RefreshType.MANUAL);
         }
     };
 
@@ -428,7 +429,7 @@ public class ReaderPostListFragment extends SherlockFragment
 
         // update posts in this tag if it's time to do so
         if (ReaderTagTable.shouldAutoUpdateTag(tagName))
-            updatePostsWithTag(tagName, ReaderActions.RequestDataAction.LOAD_NEWER, RefreshType.AUTOMATIC);
+            updatePostsWithTag(tagName, RequestDataAction.LOAD_NEWER, RefreshType.AUTOMATIC);
     }
 
     /*
@@ -468,7 +469,7 @@ public class ReaderPostListFragment extends SherlockFragment
      * get latest posts for this tag from the server
      */
     private void updatePostsWithTag(final String tagName,
-                                    final ReaderActions.RequestDataAction updateAction,
+                                    final RequestDataAction updateAction,
                                     final RefreshType refreshType) {
         if (TextUtils.isEmpty(tagName)) {
             return;
@@ -508,7 +509,7 @@ public class ReaderPostListFragment extends SherlockFragment
                 if (result == ReaderActions.UpdateResult.CHANGED && numNewPosts > 0) {
                     // if we loaded new posts and posts are already displayed, show the "new posts"
                     // bar rather than immediately refreshing the list
-                    if (!isPostAdapterEmpty() && updateAction == ReaderActions.RequestDataAction.LOAD_NEWER) {
+                    if (!isPostAdapterEmpty() && updateAction == RequestDataAction.LOAD_NEWER) {
                         showNewPostsBar();
                     } else {
                         refreshPosts();
@@ -522,7 +523,7 @@ public class ReaderPostListFragment extends SherlockFragment
 
         // if this is an automatic request for newer posts, assign a backfill listener to
         // ensure there aren't any gaps between this update and the previous one
-        boolean allowBackfill = (updateAction == ReaderActions.RequestDataAction.LOAD_NEWER
+        boolean allowBackfill = (updateAction == RequestDataAction.LOAD_NEWER
                               && refreshType == RefreshType.AUTOMATIC);
         if (allowBackfill) {
             PostBackfillListener backfillListener = new PostBackfillListener() {
@@ -552,7 +553,7 @@ public class ReaderPostListFragment extends SherlockFragment
         return mIsUpdating;
     }
 
-    public void setIsUpdating(boolean isUpdating, ReaderActions.RequestDataAction updateAction) {
+    public void setIsUpdating(boolean isUpdating, RequestDataAction updateAction) {
         if (!hasActivity() || mIsUpdating == isUpdating) {
             return;
         }
