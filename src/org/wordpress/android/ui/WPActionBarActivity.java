@@ -688,6 +688,8 @@ public abstract class WPActionBarActivity extends SherlockFragmentActivity {
             dialogBuilder.setCancelable(true);
             if (!isFinishing())
                 dialogBuilder.create().show();
+        } else if (item.getItemId()  == R.id.menu_refresh) {
+            mPostList.refreshAction();
         }
         return super.onOptionsItemSelected(item);
     }
@@ -720,7 +722,7 @@ public abstract class WPActionBarActivity extends SherlockFragmentActivity {
                 break;
             }
         }
-        
+
         if (shouldUpdateCurrentBlogStatsInBackground()) {
             WordPress.updateCurrentBlogStatsInBackground(true);
         }
@@ -733,7 +735,7 @@ public abstract class WPActionBarActivity extends SherlockFragmentActivity {
     protected boolean shouldUpdateCurrentBlogStatsInBackground() {
         return true;
     }
-    
+
     /**
      * this method is called when the user signs out of the app - descendants should override
      * this to perform activity-specific cleanup upon signout
